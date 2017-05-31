@@ -18,7 +18,7 @@ class PromiseCoreTest extends BaseUnitTestCase
     /**
      * Test on fulfill actions
      */
-    public function testOnFulfill()
+    /*public function testOnFulfill()
     {
         $request = $this->createRequest('GET', '/');
         $this->handle = curl_init();
@@ -48,12 +48,12 @@ class PromiseCoreTest extends BaseUnitTestCase
             }
         );
         static::assertEquals('foo, bar', $core->getResponse()->getHeaderLine('X-Test'));
-    }
+    }*/
 
     /**
      * Test on reject actions
      */
-    public function testOnReject()
+    /*public function testOnReject()
     {
         $request = $this->createRequest('GET', '/');
         $this->handle = curl_init();
@@ -81,14 +81,14 @@ class PromiseCoreTest extends BaseUnitTestCase
             }
         );
         static::assertEquals('Bar', $core->getException()->getMessage());
-    }
+    }*/
 
     /**
      * «onReject» callback can throw exception.
      *
      * @see https://github.com/php-http/curl-client/issues/26
      */
-    public function testIssue26()
+    /*public function testIssue26()
     {
         $request = $this->createRequest('GET', '/');
         $this->handle = curl_init();
@@ -114,7 +114,7 @@ class PromiseCoreTest extends BaseUnitTestCase
         static::assertEquals(Promise::REJECTED, $core->getState());
         static::assertInstanceOf(Exception::class, $core->getException());
         static::assertEquals('Bar', $core->getException()->getMessage());
-    }
+    }*/
 
     /**
      * @expectedException \LogicException

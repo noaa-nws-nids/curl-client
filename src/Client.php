@@ -169,6 +169,7 @@ class Client implements HttpClient, HttpAsyncClient
 
         $core = new PromiseCore($request, $handle, $responseBuilder);
         $promise = new CurlPromise($core, $this->multiRunner);
+        $core->addPromise($promise);
         $this->multiRunner->add($core);
 
         return $promise;

@@ -1,7 +1,9 @@
 <?php
 namespace Http\Client\Curl;
 
+use Http\Client\Exception;
 use Http\Promise\Promise;
+use Psr\Http\Message\ResponseInterface;
 
 /**
  * Promise represents a response that may not be available yet, but will be resolved at some point
@@ -32,6 +34,20 @@ class CurlPromise implements Promise
     private $runner;
 
     /**
+     * Promise result
+     *
+     * @var ResponseInterface|Exception|null
+     */
+    private $result;
+
+    /**
+     * Promise state
+     *
+     * @var string
+     */
+    private $state = Promise::PENDING;
+
+    /**
      * Create new promise.
      *
      * @param PromiseCore $core   Shared promise core
@@ -59,14 +75,10 @@ class CurlPromise implements Promise
      */
     public function then(callable $onFulfilled = null, callable $onRejected = null)
     {
-        if ($onFulfilled) {
-            $this->core->addOnFulfilled($onFulfilled);
-        }
-        if ($onRejected) {
-            $this->core->addOnRejected($onRejected);
-        }
+        $promise = new self($this->core, $this->runner);
+        $this->core->addPromise($promise, $this, $onFulfilled, $onRejected);
 
-        return new self($this->core, $this->runner);
+        return $promise;
     }
 
     /**
@@ -76,7 +88,7 @@ class CurlPromise implements Promise
      */
     public function getState()
     {
-        return $this->core->getState();
+        return $this->state;
     }
 
     /**
@@ -96,13 +108,30 @@ class CurlPromise implements Promise
     {
         $this->runner->wait($this->core);
 
-        if ($unwrap) {
-            if ($this->core->getState() === self::REJECTED) {
-                throw $this->core->getException();
-            }
-
-            return $this->core->getResponse();
+        if ($this->state === Promise::PENDING) {
+            throw new \RuntimeException('Promise still pending after resolution');
         }
-        return null;
+
+        if ($unwrap) {
+            if ($this->state === Promise::FULFILLED) {
+                return $this->result;
+            }
+            throw $this->result;
+        }
+    }
+
+    public function resolve($result)
+    {
+        if ($this->state !== Promise::PENDING) {
+            throw new \RuntimeException('Cannot change existing promise result');
+        } elseif ($result instanceof ResponseInterface) {
+            $this->state = Promise::FULFILLED;
+        } elseif ($result instanceof Exception) {
+            $this->state = Promise::REJECTED;
+        } else {
+            throw new \RuntimeException('Promise resolution must implement ResponseInterface or Exception');
+        }
+
+        $this->result = $result;
     }
 }

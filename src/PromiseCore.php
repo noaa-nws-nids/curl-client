@@ -37,13 +37,6 @@ class PromiseCore
     private $responseBuilder;
 
     /**
-     * Promise state
-     *
-     * @var string
-     */
-    private $state;
-
-    /**
      * Exception
      *
      * @var Exception|null
@@ -51,18 +44,13 @@ class PromiseCore
     private $exception = null;
 
     /**
-     * Functions to call when a response will be available.
+     * Callbacks.
      *
-     * @var callable[]
+     * @var array
      */
-    private $onFulfilled = [];
+    private $promises = [];
 
-    /**
-     * Functions to call when an error happens.
-     *
-     * @var callable[]
-     */
-    private $onRejected = [];
+    private $settled = false;
 
     /**
      * Create shared core.
@@ -82,37 +70,63 @@ class PromiseCore
         $this->request = $request;
         $this->handle = $handle;
         $this->responseBuilder = $responseBuilder;
-        $this->state = Promise::PENDING;
     }
 
-    /**
-     * Add on fulfilled callback.
-     *
-     * @param callable $callback
-     */
-    public function addOnFulfilled(callable $callback)
+    public function addPromise(CurlPromise $promise, CurlPromise $parent = null, callable $onFulfilled = null, callable $onRejected = null)
     {
-        if ($this->getState() === Promise::PENDING) {
-            $this->onFulfilled[] = $callback;
-        } elseif ($this->getState() === Promise::FULFILLED) {
-            $response = call_user_func($callback, $this->responseBuilder->getResponse());
-            if ($response instanceof ResponseInterface) {
-                $this->responseBuilder->setResponse($response);
-            }
+        if (!$this->settled) {
+            $this->promises[] = [$promise, $parent, $onFulfilled, $onRejected];
+        } else {
+            $this->resolve($promise, $parent, $onFulfilled, $onRejected);
         }
     }
 
-    /**
-     * Add on rejected callback.
-     *
-     * @param callable $callback
-     */
-    public function addOnRejected(callable $callback)
+    private function settle()
     {
-        if ($this->getState() === Promise::PENDING) {
-            $this->onRejected[] = $callback;
-        } elseif ($this->getState() === Promise::REJECTED) {
-            $this->exception = call_user_func($callback, $this->exception);
+        $promises = $this->promises;
+
+        while ($promises) {
+            list($promise, $parent, $onFulfilled, $onRejected) = array_shift($promises);
+
+            if ($promise->getState() !== Promise::PENDING) {
+                continue;
+            }
+
+            $this->resolve($promise, $parent, $onFulfilled, $onRejected);
+        }
+
+        $this->promises = [];
+        $this->settled = true;
+    }
+
+    private function resolve(CurlPromise $promise, CurlPromise $parent = null, callable $onFulfilled = null, callable $onRejected = null)
+    {
+        $response = null;
+        $exception = null;
+
+        if ($parent) {
+            try {
+                $response = $parent->wait(true);
+            } catch (Exception $exception) {
+                $exception = $exception;
+            }
+        } else {
+            $response = $this->getResponse();
+            $exception = $this->exception;
+        }
+
+        try {
+            if ($exception && $onRejected) {
+                $response = call_user_func($onRejected, $exception);
+            } elseif ($exception) {
+                $promise->resolve($exception);
+                return;
+            } elseif ($response && $onFulfilled) {
+                $response = call_user_func($onFulfilled, $response);
+            }
+            $promise->resolve($response);
+        } catch (Exception $exception) {
+            $promise->resolve($exception);
         }
     }
 
@@ -124,16 +138,6 @@ class PromiseCore
     public function getHandle()
     {
         return $this->handle;
-    }
-
-    /**
-     * Get the state of the promise, one of PENDING, FULFILLED or REJECTED.
-     *
-     * @return string
-     */
-    public function getState()
-    {
-        return $this->state;
     }
 
     /**
@@ -180,24 +184,17 @@ class PromiseCore
      */
     public function fulfill()
     {
-        $this->state = Promise::FULFILLED;
-        $response = $this->responseBuilder->getResponse();
-        try {
-            $response->getBody()->seek(0);
-        } catch (\RuntimeException $e) {
-            $exception = new Exception\TransferException($e->getMessage(), $e->getCode(), $e);
-            $this->reject($exception);
-
+        if ($this->settled) {
             return;
         }
 
-        while (count($this->onFulfilled) > 0) {
-            $callback = array_shift($this->onFulfilled);
-            $response = call_user_func($callback, $response);
-        }
-
-        if ($response instanceof ResponseInterface) {
-            $this->responseBuilder->setResponse($response);
+        $response = $this->responseBuilder->getResponse();
+        try {
+            $response->getBody()->seek(0);
+            $this->settle();
+        } catch (\RuntimeException $e) {
+            $exception = new Exception\TransferException($e->getMessage(), $e->getCode(), $e);
+            $this->reject($exception);
         }
     }
 
@@ -208,17 +205,11 @@ class PromiseCore
      */
     public function reject(Exception $exception)
     {
-        $this->exception = $exception;
-        $this->state = Promise::REJECTED;
-
-        while (count($this->onRejected) > 0) {
-            $callback = array_shift($this->onRejected);
-            try {
-                $exception = call_user_func($callback, $this->exception);
-                $this->exception = $exception;
-            } catch (Exception $exception) {
-                $this->exception = $exception;
-            }
+        if ($this->settled) {
+            return;
         }
+
+        $this->exception = $exception;
+        $this->settle();
     }
 }
